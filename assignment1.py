@@ -9,11 +9,32 @@ image_size = 3072 # d
 regularization_factor = 0 # lamda
 
 # mini batch parameters
-minibatch_lambda = 0
+minibatch_lambda = 1
 GDparameters = namedtuple('GDparameters', ['n_batch', 'eta', 'n_epochs'])
-GDps = GDparameters(100, 0.001, 20)
+GDps = GDparameters(100, 0.001, 40)
 
-def Montage(W, save='mygraph.png'):
+def DrawGraphs(loss_train_list, loss_val_list, acc_train_list, acc_val_list):
+    fig = plt.figure(figsize=(20, 10))
+    fig.add_subplot(121)
+    plt.plot(loss_train_list, color='green', label='Training Cost')
+    plt.plot(loss_val_list, color='red', label='Validation Cost')
+    plt.legend(loc='upper right')
+    plt.ylabel('Cost')
+    plt.xlabel('Epoch')
+    plt.title('Cost function output')
+
+    fig.add_subplot(122)
+    plt.plot(acc_train_list, color='green', label='Training Accuracy')
+    plt.plot(acc_val_list, color='red', label='Validation Accuracy')
+    plt.legend(loc='upper right')
+    plt.ylabel('Accuracy')
+    plt.xlabel('Epoch')
+    plt.title('Accuracy function output')
+
+    plt.savefig('result.png')
+
+
+def Montage(W, save='w.png'):
 	""" Display the image for each label in W """
 	_fig, ax = plt.subplots(2,5)
 	for i in range(2):
@@ -137,6 +158,11 @@ def GetMinibatches(X, Y, GDparams=GDps, seed=0):
     return mini_batches
 
 def MiniBatchGD(X, Y, y, ValX, ValY, Valy, W, b, GDparams=GDps, MinibatchLambda=minibatch_lambda):
+    loss_train_list = []
+    loss_val_list = []
+    acc_train_list = []
+    acc_val_list = []
+
     for i in range(GDparams.n_epochs):
         # seed += 1
         minibatches = GetMinibatches(X, Y, GDparams)
@@ -154,6 +180,11 @@ def MiniBatchGD(X, Y, y, ValX, ValY, Valy, W, b, GDparams=GDps, MinibatchLambda=
         acc_train = ComputeAccuracy(X, y, W, b)
         acc_val = ComputeAccuracy(ValX, Valy, W, b)
 
+        loss_train_list.append(cost_train)
+        loss_val_list.append(cost_val)
+        acc_train_list.append(acc_train)
+        acc_val_list.append(acc_val)
+
         print('~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~')
         print('Train cost is: ' + str(cost_train))
         print('Train accuracy is: ' + str(acc_train))
@@ -161,6 +192,9 @@ def MiniBatchGD(X, Y, y, ValX, ValY, Valy, W, b, GDparams=GDps, MinibatchLambda=
         print('Validation cost is: ' + str(cost_val))
         print('Validation accuracy is: ' + str(acc_val))
         print('~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~')
+
+    DrawGraphs(loss_train_list, loss_val_list, acc_train_list, acc_val_list)
+    Montage(W)
 
 
 if __name__ == '__main__':
