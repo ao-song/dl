@@ -1,10 +1,17 @@
 import pickle
 import matplotlib.pyplot as plt
 import numpy as np
+from collections import namedtuple
+import math
 
-lablenum = 10 # K
-imagesize = 3072 # d
-regularizationFactor = 0 # lamda
+lable_num = 10 # K
+image_size = 3072 # d
+regularization_factor = 0 # lamda
+
+# mini batch parameters
+minibatch_lambda = 0
+GDparameters = namedtuple('GDparameters', ['n_batch', 'eta', 'n_epochs'])
+GDps = GDparameters(100, 0.001, 20)
 
 def Montage(W, save='mygraph.png'):
 	""" Display the image for each label in W """
@@ -25,7 +32,7 @@ def LoadBatch(filename):
         dict = pickle.load(fo, encoding='bytes')
     X = dict[b'data'].transpose()
     y = dict[b'labels']
-    Y = np.zeros((lablenum, X.shape[1]))
+    Y = np.zeros((lable_num, X.shape[1]))
     for i in range(len(y)):
         Y[y[i], i] = 1
     return X, Y, y
@@ -41,7 +48,7 @@ def EvaluateClassifier(X, W, b):
     s = np.matmul(W, X) + b
     return np.exp(s) / np.sum(np.exp(s), axis=0)
 
-def ComputeCost(X, Y, W, b, lamda=regularizationFactor):
+def ComputeCost(X, Y, W, b, lamda=regularization_factor):
     lcross = np.diag(
         -np.log(np.matmul(Y.transpose(), EvaluateClassifier(X, W, b))))
     return (lcross.sum()) / X.shape[1] + lamda * np.sum(np.square(W))
@@ -51,7 +58,7 @@ def ComputeAccuracy(X, y, W, b):
     err = np.count_nonzero(p - y) / X.shape[1]
     return (1 - err)
 
-def ComputeGradients(X, Y, P, W, lamda=regularizationFactor):
+def ComputeGradients(X, Y, P, W, lamda=regularization_factor):
     gBatch = -(Y - P)
     gW = np.matmul(gBatch, X.transpose()) / X.shape[1]
     gb = np.matmul(gBatch, np.ones((X.shape[1], 1))) / X.shape[1]
@@ -93,8 +100,8 @@ def ComputeGradsNumSlow(X, Y, P, W, b, lamda=0, h=1e-6):
 def CheckGrads():
     trainX, trainHotY, trainY = LoadBatch('data_batch_1')
     w, b = GenWb()
-    X = trainX[:, 0].reshape((imagesize, 1))
-    Y = trainHotY[:, 0].reshape((lablenum, 1))
+    X = trainX[:, 0].reshape((image_size, 1))
+    Y = trainHotY[:, 0].reshape((lable_num, 1))
     y = trainY[:10]
 
     P = EvaluateClassifier(X, w, b)
@@ -109,22 +116,76 @@ def CheckGrads():
     else:
         print('Check ComputeGradients failed!')
 
+def GetMinibatches(X, Y, GDparams=GDps, seed=0):
+    np.random.seed(seed)
+    m = X.shape[1]
+    mini_batches = []
+    permutation = list(np.random.permutation(m))
+    shuffled_X = X[:, permutation]
+    shuffled_Y = Y[:, permutation]
+
+    minibatches_num = math.floor(m / GDparams.n_batch)
+    for k in range(minibatches_num):
+        minibatch_X = shuffled_X[:, k * GDparams.n_batch:(k+1) * GDparams.n_batch]
+        minibatch_Y = shuffled_Y[:, k * GDparams.n_batch:(k+1) * GDparams.n_batch]
+        mini_batches.append((minibatch_X, minibatch_Y))
+    if m % GDparams.n_batch != 0:
+        minibatch_X = shuffled_X[:, minibatches_num * GDparams.n_batch:]
+        minibatch_Y = shuffled_Y[:, minibatches_num * GDparams.n_batch:]
+        mini_batches.append((minibatch_X, minibatch_Y))
+
+    return mini_batches
+
+def MiniBatchGD(X, Y, y, ValX, ValY, Valy, W, b, GDparams=GDps, MinibatchLambda=minibatch_lambda):
+    for i in range(GDparams.n_epochs):
+        # seed += 1
+        minibatches = GetMinibatches(X, Y, GDparams)
+        for minibatch in minibatches:
+            (minibatch_X, minibatch_Y) = minibatch
+            P = EvaluateClassifier(minibatch_X, W, b)
+            gd_w, gd_b = ComputeGradients(minibatch_X, minibatch_Y, P, W, MinibatchLambda)
+            W -= GDparams.eta * gd_w
+            b -= GDparams.eta * gd_b
+
+        P_train = EvaluateClassifier(X, W, b)
+        P_val = EvaluateClassifier(ValX, W, b)
+        cost_train = ComputeCost(X, Y, W, P_train, MinibatchLambda)
+        cost_val = ComputeCost(ValX, ValY, W, P_val, MinibatchLambda)
+        acc_train = ComputeAccuracy(X, y, W, b)
+        acc_val = ComputeAccuracy(ValX, Valy, W, b)
+
+        print('~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~')
+        print('Train cost is: ' + str(cost_train))
+        print('Train accuracy is: ' + str(acc_train))
+        print('******************************************')
+        print('Validation cost is: ' + str(cost_val))
+        print('Validation accuracy is: ' + str(acc_val))
+        print('~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~')
+
 
 if __name__ == '__main__':
-    # # load the data
-    # trainX, trainHotY, trainY = LoadBatch('data_batch_1')
-    # valX, valHotY, valY = LoadBatch('data_batch_2')
+    print('Check gradient computation accurary...')
+    CheckGrads()
+    print('Training start, loading the data...')
+    # load the data
+    trainX, trainHotY, trainY = LoadBatch('data_batch_1')
+    valX, valHotY, valY = LoadBatch('data_batch_2')
     # testX, testHotY, testY = LoadBatch('test_batch')
-    # # print(trainHotY)
-    # # print(np.shape(trainHotY))
-    # # print(trainY)
-    # # print(np.shape(trainY))
-    # # Montage(data[b'data'])
+    # print(trainHotY)
+    # print(np.shape(trainHotY))
+    # print(trainY)
+    # print(np.shape(trainY))
+    # Montage(data[b'data'])
 
-    # # pre-process the data
-    # trainX = PreProcess(trainX)
-    # valX = PreProcess(valX)
+    # pre-process the data
+    print('Preprocess the data...')
+    trainX = PreProcess(trainX)
+    valX = PreProcess(valX)
     # testX = PreProcess(testX)
+
+    print('Start training...')
+    W, b = GenWb()
+    MiniBatchGD(trainX, trainHotY, trainY, valX, valHotY, valY, W, b)
 
     # # print(trainX)
 
@@ -141,5 +202,5 @@ if __name__ == '__main__':
     # # a = ComputeAccuracy(trainX, trainY, w, b)
     # # print(a)
 
-    CheckGrads()
+
 
