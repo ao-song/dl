@@ -9,21 +9,29 @@ image_size = 3072 # d
 regularization_factor = 0 # lamda
 
 # mini batch parameters
-minibatch_lambda = 1
+minibatch_lambda = 0
 GDparameters = namedtuple('GDparameters', ['n_batch', 'eta', 'n_epochs'])
 GDps = GDparameters(100, 0.001, 40)
 
-def DrawGraphs(loss_train_list, loss_val_list, acc_train_list, acc_val_list):
-    fig = plt.figure(figsize=(20, 10))
-    fig.add_subplot(121)
-    plt.plot(loss_train_list, color='green', label='Training Cost')
-    plt.plot(loss_val_list, color='red', label='Validation Cost')
+def DrawGraphs(cost_train_list, cost_val_list, loss_train_list, loss_val_list, acc_train_list, acc_val_list):
+    fig = plt.figure(figsize=(30, 10))
+    fig.add_subplot(131)
+    plt.plot(cost_train_list, color='green', label='Training Cost')
+    plt.plot(cost_val_list, color='red', label='Validation Cost')
     plt.legend(loc='upper right')
     plt.ylabel('Cost')
     plt.xlabel('Epoch')
     plt.title('Cost function output')
 
-    fig.add_subplot(122)
+    fig.add_subplot(132)
+    plt.plot(loss_train_list, color='green', label='Training Accuracy')
+    plt.plot(loss_val_list, color='red', label='Validation Accuracy')
+    plt.legend(loc='upper right')
+    plt.ylabel('Loss')
+    plt.xlabel('Epoch')
+    plt.title('Loss function output')
+
+    fig.add_subplot(133)
     plt.plot(acc_train_list, color='green', label='Training Accuracy')
     plt.plot(acc_val_list, color='red', label='Validation Accuracy')
     plt.legend(loc='upper right')
@@ -58,8 +66,11 @@ def LoadBatch(filename):
         Y[y[i], i] = 1
     return X, Y, y
 
-def PreProcess(Data):
-    return (Data - np.mean(Data, axis=0)) / np.std(Data, axis=0)
+def GetMeanStd(Data):
+    return np.mean(Data), np.std(Data)
+
+def PreProcess(x, mean, std):
+    return (x - mean) / std
 
 def GenWb(K=10, d=3072, m=50, mean=0.0, di=0.01):
     return np.random.normal(mean, 1/math.sqrt(d), (m, d)), \
@@ -82,7 +93,7 @@ def ComputeCost(X, Y, W1, b1, W2, b2, lamda=regularization_factor):
     lcross = np.diag(-np.log(np.matmul(Y.transpose(), p)))
     loss = lcross.sum()
     return (loss / X.shape[1]) + \
-           lamda * (np.sum(np.square(W1)) + np.sum(np.square(W2))), loss
+           lamda * (np.sum(np.square(W1)) + np.sum(np.square(W2))), loss / X.shape[1]
 
 def ComputeAccuracy(X, y, W1, b1, W2, b2):
     p, _h = EvaluateClassifier(X, W1, b1, W2, b2)
@@ -178,6 +189,16 @@ def CheckGrads():
     else:
         print('Check ComputeGradients failed!')
 
+def GetEta(t, eta_min=1e-5, eta_max=1e-1, ns=500):
+    interval = 2 * ns
+    while t > interval:
+        t -= interval
+
+    if t <= 2*ns:
+        return eta_min + (t/ns)*(eta_max-eta_min)
+    else:
+        return eta_max - ((t-ns)/ns)*(eta_max-eta_min)
+
 def GetMinibatches(X, Y, GDparams=GDps, seed=0):
     np.random.seed(seed)
     m = X.shape[1]
@@ -198,31 +219,44 @@ def GetMinibatches(X, Y, GDparams=GDps, seed=0):
 
     return mini_batches
 
-def MiniBatchGD(X, Y, y, ValX, ValY, Valy, W, b, GDparams=GDps, MinibatchLambda=minibatch_lambda):
+def MiniBatchGD(X, Y, y, ValX, ValY, Valy, W1, b1, W2, b2, GDparams=GDps, MinibatchLambda=minibatch_lambda):
+    cost_train_list = []
+    cost_val_list = []
     loss_train_list = []
     loss_val_list = []
     acc_train_list = []
     acc_val_list = []
 
+    t = 1
+    cycles = 2
+    n_s = 2*math.floor(45000/100)
     for i in range(GDparams.n_epochs):
+        if t > 2*cycles*n_s:
+            break
         # seed += 1
         minibatches = GetMinibatches(X, Y, GDparams)
         for minibatch in minibatches:
             (minibatch_X, minibatch_Y) = minibatch
-            P = EvaluateClassifier(minibatch_X, W, b)
-            gd_w, gd_b = ComputeGradients(minibatch_X, minibatch_Y, P, W, MinibatchLambda)
-            W -= GDparams.eta * gd_w
-            b -= GDparams.eta * gd_b
+            P, h = EvaluateClassifier(minibatch_X, W1, b1, W2, b2)
+            gd_w1, gd_b1, gd_w2, gd_b2 = ComputeGradients(minibatch_X, minibatch_Y, P, h, W1, W2, MinibatchLambda)
+            eta = GetEta(t, ns=n_s)
+            W1 -= eta * gd_w1
+            b1 -= eta * gd_b1
+            W2 -= eta * gd_w2
+            b2 -= eta * gd_b2
+            t += 1
 
-        P_train = EvaluateClassifier(X, W, b)
-        P_val = EvaluateClassifier(ValX, W, b)
-        cost_train = ComputeCost(X, Y, W, P_train, MinibatchLambda)
-        cost_val = ComputeCost(ValX, ValY, W, P_val, MinibatchLambda)
-        acc_train = ComputeAccuracy(X, y, W, b)
-        acc_val = ComputeAccuracy(ValX, Valy, W, b)
+        P_train, _h = EvaluateClassifier(X, W1, b1, W2, b2)
+        P_val, _h = EvaluateClassifier(ValX, W1, b1, W2, b2)
+        cost_train, h_train = ComputeCost(X, Y, W1, b1, W2, b2, MinibatchLambda)
+        cost_val, h_val = ComputeCost(ValX, ValY, W1, b1, W2, b2, MinibatchLambda)
+        acc_train = ComputeAccuracy(X, y, W1, b1, W2, b2)
+        acc_val = ComputeAccuracy(ValX, Valy, W1, b1, W2, b2)
 
-        loss_train_list.append(cost_train)
-        loss_val_list.append(cost_val)
+        cost_train_list.append(cost_train)
+        cost_val_list.append(cost_val)
+        loss_train_list.append(h_train)
+        loss_val_list.append(h_val)
         acc_train_list.append(acc_train)
         acc_val_list.append(acc_val)
 
@@ -234,26 +268,46 @@ def MiniBatchGD(X, Y, y, ValX, ValY, Valy, W, b, GDparams=GDps, MinibatchLambda=
         print('Validation accuracy is: ' + str(acc_val))
         print('~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~')
 
-    DrawGraphs(loss_train_list, loss_val_list, acc_train_list, acc_val_list)
-    Montage(W)
+    DrawGraphs(cost_train_list, cost_val_list, loss_train_list, loss_val_list, acc_train_list, acc_val_list)
+    # Montage(W)
+    return W1, b1, W2, b2
 
 
 if __name__ == '__main__':
     print('Check gradient computation accurary...')
     CheckGrads()
-    # print('Training start, loading the data...')
-    # # load the data
-    # trainX, trainHotY, trainY = LoadBatch('data_batch_1')
-    # valX, valHotY, valY = LoadBatch('data_batch_2')
+    print('Training start, loading the data...')
+    # load the data
+    x1, Y1, y1 = LoadBatch('data_batch_1')
+    x2, Y2, y2 = LoadBatch('data_batch_2')
+    x3, Y3, y3 = LoadBatch('data_batch_3')
+    x4, Y4, y4 = LoadBatch('data_batch_4')
+    x5, Y5, y5 = LoadBatch('data_batch_5')
 
-    # # pre-process the data
-    # print('Preprocess the data...')
-    # trainX = PreProcess(trainX)
-    # valX = PreProcess(valX)
+    trainX = np.concatenate((x1, x2, x3, x4, x5), axis=1)
+    trainHotY = np.concatenate((Y1, Y2, Y3, Y4, Y5), axis=1)
+    trainY = y1 + y2 + y3 + y4 + y5
 
-    # print('Start training...')
-    # W, b = GenWb()
-    # MiniBatchGD(trainX, trainHotY, trainY, valX, valHotY, valY, W, b)
+    valX = trainX[:, trainX.shape[1]-5000:]
+    valHotY = trainHotY[:, trainHotY.shape[1]-5000:]
+    valY = trainY[-5000:]
 
+    trainX = trainX[:, :trainX.shape[1]-5000]
+    trainHotY = trainHotY[:, :trainHotY.shape[1]-5000]
+    trainY = trainY[:-5000]
 
+    testX, testHotY, testY = LoadBatch('test_batch')
+
+    # pre-process the data
+    print('Preprocess the data...')
+    meanX, stdX = GetMeanStd(trainX)
+    trainX = PreProcess(trainX, meanX, stdX)
+    valX = PreProcess(valX, meanX, stdX)
+    testX = PreProcess(testX, meanX, stdX)
+
+    print('Start training...')
+    W1, W2, b1, b2 = GenWb()
+    W1, b1, W2, b2 = MiniBatchGD(trainX, trainHotY, trainY, valX, valHotY, valY, W1, b1, W2, b2)
+    print('Final test cost is: ' + str(ComputeCost(testX, testHotY, W1, b1, W2, b2)))
+    print('Final test accuracy is: ' + str(ComputeAccuracy(testX, testY, W1, b1, W2, b2)))
 
